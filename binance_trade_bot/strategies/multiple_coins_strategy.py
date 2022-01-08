@@ -25,14 +25,9 @@ class Strategy(AutoTrader):
 
             if coin_price * current_coin_balance < min_notional:
                 continue
-
-            # Display on the console, the current coin+Bridge, so users can see *some* activity and not think the bot
-            # has stopped. Not logging though to reduce log size.
-            print(
-                f"{datetime.now()} - CONSOLE - INFO - I am scouting the best trades. "
-                f"Current coin: {coin.symbol + self.config.BRIDGE.symbol} ",
-                end="\r",
-            )
+            
+            self.logger.debug("I am scouting the best trades. "
+            f"Current coin: {coin.symbol + self.config.BRIDGE.symbol} ")
 
             self._jump_to_best_coin(coin, coin_price, quote_amount, current_coin_balance)
 

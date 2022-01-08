@@ -16,7 +16,13 @@ from .ratios import CoinStub
 
 
 class AutoTrader(ABC):
-    def __init__(self, binance_manager: BinanceAPIManager, database: Database, logger: Logger, config: Config):
+    def __init__(
+        self,
+        binance_manager: BinanceAPIManager,
+        database: Database,
+        logger: Logger,
+        config: Config,
+    ):
         self.manager = binance_manager
         self.db = database
         self.logger = logger
@@ -25,19 +31,32 @@ class AutoTrader(ABC):
     def initialize(self):
         self.initialize_trade_thresholds()
 
-    def transaction_through_bridge(self, from_coin: CoinStub, to_coin: CoinStub, sell_price: float, buy_price: float):
+    def transaction_through_bridge(
+        self,
+        from_coin: CoinStub,
+        to_coin: CoinStub,
+        sell_price: float,
+        buy_price: float,
+    ):
         """
         Jump from the source coin to the destination coin through bridge coin
         """
         to_coin_original_amount = self.manager.get_currency_balance(to_coin.symbol)
 
-        if self.manager.sell_alt(from_coin.symbol, self.config.BRIDGE.symbol, sell_price) is None:
+        if (
+            self.manager.sell_alt(
+                from_coin.symbol, self.config.BRIDGE.symbol, sell_price
+            )
+            is None
+        ):
             self.logger.error(
                 f"Market sell failed, from_coin: {from_coin.symbol}, to_coin: {to_coin.symbol},"
                 f" sell_price: {sell_price}"
             )
 
-        result = self.manager.buy_alt(to_coin.symbol, self.config.BRIDGE.symbol, buy_price)
+        result = self.manager.buy_alt(
+            to_coin.symbol, self.config.BRIDGE.symbol, buy_price
+        )
         if result is not None:
             self.db.set_current_coin(to_coin.symbol)
             price = result.price
@@ -48,11 +67,19 @@ class AutoTrader(ABC):
             while not update_successful:
                 to_coin_amount = self.manager.get_currency_balance(to_coin.symbol)
                 while to_coin_original_amount >= to_coin_amount:
-                    balances_changed = self.manager.cache.balances_changed_event.wait(1.0)
+                    balances_changed = self.manager.cache.balances_changed_event.wait(
+                        1.0
+                    )
                     self.manager.cache.balances_changed_event.clear()
-                    to_coin_amount = self.manager.get_currency_balance(to_coin.symbol, force=(not balances_changed))
+                    to_coin_amount = self.manager.get_currency_balance(
+                        to_coin.symbol, force=(not balances_changed)
+                    )
                 update_successful = self.update_trade_threshold(
-                    to_coin, from_coin, price, to_coin_amount, result.cumulative_quote_qty
+                    to_coin,
+                    from_coin,
+                    price,
+                    to_coin_amount,
+                    result.cumulative_quote_qty,
                 )
                 if not update_successful:
                     self.logger.info("Update of ratios failed, retry in 1s")
@@ -80,7 +107,9 @@ class AutoTrader(ABC):
 
         if to_coin_buy_price is None:
             self.logger.info(
-                "Skipping update... current coin {} not found".format(to_coin.symbol + self.config.BRIDGE.symbol)
+                "Skipping update... current coin {} not found".format(
+                    to_coin.symbol + self.config.BRIDGE.symbol
+                )
             )
             return False
 
@@ -99,7 +128,9 @@ class AutoTrader(ABC):
                 )
                 return False
 
-            self.db.ratios_manager.set(coin.idx, to_coin.idx, coin_price / to_coin_buy_price)
+            self.db.ratios_manager.set(
+                coin.idx, to_coin.idx, coin_price / to_coin_buy_price
+            )
 
         if from_coin is not None:
             from_coin_buy_price, _ = self.manager.get_market_buy_price(
@@ -116,19 +147,27 @@ class AutoTrader(ABC):
             self.db.ratios_manager.set(
                 to_coin.idx,
                 from_coin.idx,
-                max(self.db.ratios_manager.get(to_coin.idx, from_coin.idx), to_coin_sell_price / from_coin_buy_price),
+                max(
+                    self.db.ratios_manager.get(to_coin.idx, from_coin.idx),
+                    to_coin_sell_price / from_coin_buy_price,
+                ),
             )
 
         return True
 
     def _max_value_in_wallet(self) -> float:
-        balances = {coin.symbol: self.manager.get_currency_balance(coin.symbol) for coin in CoinStub.get_all()}
+        balances = {
+            coin.symbol: self.manager.get_currency_balance(coin.symbol)
+            for coin in CoinStub.get_all()
+        }
         bridge_balance = self.manager.get_currency_balance(self.config.BRIDGE.symbol)
 
         max_quote_amount = bridge_balance
         while True:
             for symbol, amount in balances.items():
-                _, quote_amount = self.manager.get_market_sell_price(symbol + self.config.BRIDGE.symbol, amount)
+                _, quote_amount = self.manager.get_market_sell_price(
+                    symbol + self.config.BRIDGE.symbol, amount
+                )
                 if quote_amount is None:
                     break
                 max_quote_amount = max(max_quote_amount, quote_amount)
@@ -153,24 +192,33 @@ class AutoTrader(ABC):
                     grouped_pairs[pair.from_coin.symbol].append(pair)
             for from_coin_symbol, group in grouped_pairs.items():
                 from_coin_idx = CoinStub.get_by_symbol(from_coin_symbol).idx
-                self.logger.info(f"Initializing {from_coin_symbol} vs [{', '.join([p.to_coin.symbol for p in group])}]")
+                self.logger.info(
+                    f"Initializing {from_coin_symbol} vs [{', '.join([p.to_coin.symbol for p in group])}]"
+                )
                 for pair in group:
                     for _ in range(10):
-                        from_coin_price, _ = self.manager.get_market_sell_price_fill_quote(
-                            from_coin_symbol + self.config.BRIDGE.symbol, max_quote_amount
+                        (
+                            from_coin_price,
+                            _,
+                        ) = self.manager.get_market_sell_price_fill_quote(
+                            from_coin_symbol + self.config.BRIDGE.symbol,
+                            max_quote_amount,
                         )
                         if from_coin_price is not None:
                             break
                         time.sleep(1)
                     if from_coin_price is None:
                         self.logger.info(
-                            "Skipping initializing {}, symbol not found".format(pair.from_coin + self.config.BRIDGE)
+                            "Skipping initializing {}, symbol not found".format(
+                                pair.from_coin + self.config.BRIDGE
+                            )
                         )
                         continue
 
                     for _ in range(10):
                         to_coin_price, _ = self.manager.get_market_buy_price(
-                            pair.to_coin.symbol + self.config.BRIDGE.symbol, max_quote_amount
+                            pair.to_coin.symbol + self.config.BRIDGE.symbol,
+                            max_quote_amount,
                         )
                         if to_coin_price is not None:
                             break
@@ -178,12 +226,16 @@ class AutoTrader(ABC):
 
                     if to_coin_price is None:
                         self.logger.info(
-                            "Skipping initializing {}, symbol not found".format(pair.to_coin + self.config.BRIDGE)
+                            "Skipping initializing {}, symbol not found".format(
+                                pair.to_coin + self.config.BRIDGE
+                            )
                         )
                         continue
 
                     ratios_manager.set(
-                        from_coin_idx, CoinStub.get_by_symbol(pair.to_coin.symbol).idx, from_coin_price / to_coin_price
+                        from_coin_idx,
+                        CoinStub.get_by_symbol(pair.to_coin.symbol).idx,
+                        from_coin_price / to_coin_price,
                     )
         self.db.commit_ratios()
 
@@ -208,7 +260,10 @@ class AutoTrader(ABC):
             if coin.idx == to_idx:
                 continue
             to_coin = CoinStub.get_by_idx(to_idx)
-            optional_coin_buy_price, optional_coin_amount = self.manager.get_market_buy_price(
+            (
+                optional_coin_buy_price,
+                optional_coin_amount,
+            ) = self.manager.get_market_buy_price(
                 to_coin.symbol + self.config.BRIDGE.symbol, quote_amount
             )
 
@@ -218,13 +273,20 @@ class AutoTrader(ABC):
                 )
                 continue
 
-            price_amounts[to_coin.symbol] = (optional_coin_buy_price, optional_coin_amount)
+            price_amounts[to_coin.symbol] = (
+                optional_coin_buy_price,
+                optional_coin_amount,
+            )
 
             # Obtain (current coin)/(optional coin)
             coin_opt_coin_ratio = coin_sell_price / optional_coin_buy_price
 
-            from_fee = self.manager.get_fee(coin.symbol, self.config.BRIDGE.symbol, True)
-            to_fee = self.manager.get_fee(to_coin.symbol, self.config.BRIDGE.symbol, False)
+            from_fee = self.manager.get_fee(
+                coin.symbol, self.config.BRIDGE.symbol, True
+            )
+            to_fee = self.manager.get_fee(
+                to_coin.symbol, self.config.BRIDGE.symbol, False
+            )
             transaction_fee = from_fee + to_fee - from_fee * to_fee
 
             if self.config.USE_MARGIN:
@@ -284,26 +346,40 @@ class AutoTrader(ABC):
 
         while can_walk_deeper:
             if not is_initial_coin:
-                last_coin_sell_price, last_coin_quote = self.manager.get_market_sell_price(
+                (
+                    last_coin_sell_price,
+                    last_coin_quote,
+                ) = self.manager.get_market_sell_price(
                     last_coin.symbol + self.config.BRIDGE.symbol, last_coin_amount
                 )
                 if last_coin_sell_price is None:
                     self.db.ratios_manager.rollback()
                     return
             ratio_dict, prices = self._get_ratios(
-                last_coin, last_coin_sell_price, last_coin_quote, enable_scout_log=is_initial_coin
+                last_coin,
+                last_coin_sell_price,
+                last_coin_quote,
+                enable_scout_log=is_initial_coin,
             )
 
             ratio_dict = {k: v for k, v in ratio_dict.items() if v > 0}
+            
 
             # if we have any viable options, pick the one with the biggest ratio
             if ratio_dict:
                 new_best_pair = max(ratio_dict, key=ratio_dict.get)
                 new_best_coin = CoinStub.get_by_idx(new_best_pair[1])
-                if not is_initial_coin:  # update thresholds because we should buy anyway when walk through chain
+                ratio_to_save = ratio_dict[new_best_pair]
+                if (
+                    not is_initial_coin
+                ):  # update thresholds because we should buy anyway when walk through chain
                     # This should be performed in a single transaction so we don't leave our ratios in invalid state
                     if not self.update_trade_threshold(
-                        last_coin, new_best_coin, last_coin_buy_price, last_coin_amount, last_coin_quote
+                        last_coin,
+                        new_best_coin,
+                        last_coin_buy_price,
+                        last_coin_amount,
+                        last_coin_quote,
                     ):
                         self.db.ratios_manager.rollback()
                         return
@@ -319,21 +395,46 @@ class AutoTrader(ABC):
             if len(jump_chain) > 2:
                 self.logger.info(f"Squashed jump chain: {jump_chain}")
             if jump_chain[0] != jump_chain[-1]:
-                self.logger.info(f"Will be jumping from {coin.symbol} to {last_coin.symbol}")
-                result = self.transaction_through_bridge(coin, last_coin, coin_sell_price, last_coin_buy_price)
-                expected_sold_quantity = self.manager.sell_quantity(coin.symbol, self.config.BRIDGE.symbol, coin_amount)
-                expected_bridge = expected_sold_quantity * coin_sell_price * 0.999 + bridge_balance
+                self.logger.info(
+                    f"Will be jumping from {coin.symbol} to {last_coin.symbol}"
+                )
+                result = self.transaction_through_bridge(
+                    coin, last_coin, coin_sell_price, last_coin_buy_price
+                )
+                expected_sold_quantity = self.manager.sell_quantity(
+                    coin.symbol, self.config.BRIDGE.symbol, coin_amount
+                )
+                expected_bridge = (
+                    expected_sold_quantity * coin_sell_price * 0.999 + bridge_balance
+                )
                 expected_bought_quantity_no_fees = self.manager.buy_quantity(
-                    last_coin.symbol, self.config.BRIDGE.symbol, expected_bridge, last_coin_buy_price
+                    last_coin.symbol,
+                    self.config.BRIDGE.symbol,
+                    expected_bridge,
+                    last_coin_buy_price,
                 )
                 self.logger.info(
                     f"Expected: {expected_bought_quantity_no_fees:0.08f}, "
                     f"Actual: {result.cumulative_filled_quantity:0.08f}, "
                     f"Slippage: {expected_bought_quantity_no_fees/result.cumulative_filled_quantity - 1:0.06%}"
                 )
+                self.logger.jump_metric(
+                    coin.symbol,
+                    last_coin.symbol,
+                    expected_sold_quantity,
+                    expected_bought_quantity_no_fees,
+                    coin_sell_price,
+                    last_coin_buy_price,
+                    ratio_to_save,
+                    self.manager.datetime if hasattr(self.manager, "datetime") else datetime.now()
+                )
             else:
-                self.update_trade_threshold(coin, None, coin_sell_price, 0, quote_amount)
-                self.logger.info(f"Eliminated jump loop from {coin.symbol} to {coin.symbol}")
+                self.update_trade_threshold(
+                    coin, None, coin_sell_price, 0, quote_amount
+                )
+                self.logger.info(
+                    f"Eliminated jump loop from {coin.symbol} to {coin.symbol}"
+                )
 
     @postpone_heavy_calls
     def _jump_to_best_coin_scout_margin(
@@ -375,12 +476,16 @@ class AutoTrader(ABC):
 
         coins = CoinStub.get_all()
         if all(
-            bridge_balance <= self.manager.get_min_notional(coin.symbol, self.config.BRIDGE.symbol) for coin in coins
+            bridge_balance
+            <= self.manager.get_min_notional(coin.symbol, self.config.BRIDGE.symbol)
+            for coin in coins
         ):
             return None
 
         for coin in coins:
-            current_coin_price = self.manager.get_ticker_price(coin.symbol + self.config.BRIDGE.symbol)
+            current_coin_price = self.manager.get_ticker_price(
+                coin.symbol + self.config.BRIDGE.symbol
+            )
 
             if current_coin_price is None:
                 continue
@@ -388,12 +493,18 @@ class AutoTrader(ABC):
             ratio_dict, _ = self._get_ratios(coin, current_coin_price, bridge_balance)
             if not any(v > 0 for v in ratio_dict.values()):
                 # There will only be one coin where all the ratios are negative. When we find it, buy it if we can
-                if bridge_balance > self.manager.get_min_notional(coin.symbol, self.config.BRIDGE.symbol):
-                    self.logger.info(f"Will be purchasing {coin.symbol} using bridge coin")
+                if bridge_balance > self.manager.get_min_notional(
+                    coin.symbol, self.config.BRIDGE.symbol
+                ):
+                    self.logger.info(
+                        f"Will be purchasing {coin.symbol} using bridge coin"
+                    )
                     result = self.manager.buy_alt(
                         coin.symbol,
                         self.config.BRIDGE.symbol,
-                        self.manager.get_ticker_price(coin.symbol + self.config.BRIDGE.symbol),
+                        self.manager.get_ticker_price(
+                            coin.symbol + self.config.BRIDGE.symbol
+                        ),
                     )
                     if result is not None:
                         self.db.set_current_coin(coin.symbol)

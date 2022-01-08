@@ -17,8 +17,7 @@ class Strategy(AutoTrader):
         """
         current_coin = self.db.get_current_coin()
         current_coin_amount = self.manager.get_currency_balance(current_coin.symbol)
-        # Display on the console, the current coin+Bridge, so users can see *some* activity and not think the bot has
-        # stopped. Not logging though to reduce log size.
+        
         self.logger.debug("I am scouting the best trades. "
             f"Current coin: {current_coin + self.config.BRIDGE} ")
 

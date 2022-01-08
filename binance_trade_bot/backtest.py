@@ -14,6 +14,7 @@ from .logger import Logger
 from .models import Pair, ScoutHistory
 from .strategies import get_strategy
 from .sqlitecache import SQLiteCache
+from .metric import Metric
 
 
 class MockBinanceManager(BinanceAPIManager):
@@ -29,7 +30,12 @@ class MockBinanceManager(BinanceAPIManager):
         start_balances: Dict[str, float] = None,
     ):  # pylint:disable=too-many-arguments
         super().__init__(
-            client, binance_cache, config, db, logger, BinanceOrderBalanceManager(logger, client, binance_cache)
+            client,
+            binance_cache,
+            config,
+            db,
+            logger,
+            BinanceOrderBalanceManager(logger, client, binance_cache),
         )
         self.sqlite_cache = sqlite_cache
         self.config = config
@@ -66,7 +72,9 @@ class MockBinanceManager(BinanceAPIManager):
             if end_date > datetime.now():
                 end_date = datetime.now()
             end_date_str = end_date.strftime("%d %b %Y %H:%M:%S")
-            self.logger.info(f"Fetching prices for {ticker_symbol} between {self.datetime} and {end_date}")
+            self.logger.info(
+                f"Fetching prices for {ticker_symbol} between {self.datetime} and {end_date}"
+            )
             historical_klines = self.binance_client.get_historical_klines(
                 ticker_symbol, "1m", target_date, end_date_str, limit=1000
             )
@@ -74,13 +82,18 @@ class MockBinanceManager(BinanceAPIManager):
             no_data_end_date = (
                 end_date
                 if len(historical_klines) == 0
-                else (datetime.utcfromtimestamp(historical_klines[0][0] / 1000) - timedelta(minutes=1))
+                else (
+                    datetime.utcfromtimestamp(historical_klines[0][0] / 1000)
+                    - timedelta(minutes=1)
+                )
             )
             while no_data_cur_date <= no_data_end_date:
-                self.sqlite_cache.add(ticker_symbol, no_data_cur_date, 0.0 ) 
+                self.sqlite_cache.add(ticker_symbol, no_data_cur_date, 0.0)
                 no_data_cur_date += timedelta(minutes=1)
             for result in historical_klines:
-                date = datetime.utcfromtimestamp(result[0] / 1000).replace(second = 0, microsecond = 0)
+                date = datetime.utcfromtimestamp(result[0] / 1000).replace(
+                    second=0, microsecond=0
+                )
                 price = float(result[1])
                 self.sqlite_cache.add(ticker_symbol, date, price)
             self.sqlite_cache.commit()
@@ -101,7 +114,9 @@ class MockBinanceManager(BinanceAPIManager):
         price = self.get_ticker_price(symbol)
         return (price, quote_amount / price) if price is not None else (None, None)
 
-    def get_market_sell_price_fill_quote(self, symbol: str, quote_amount: float) -> (float, float):
+    def get_market_sell_price_fill_quote(
+        self, symbol: str, quote_amount: float
+    ) -> (float, float):
         price = self.get_ticker_price(symbol)
         return (price, quote_amount / price) if price is not None else (None, None)
 
@@ -113,11 +128,17 @@ class MockBinanceManager(BinanceAPIManager):
         from_coin_price = self.get_ticker_price(origin_symbol + target_symbol)
         assert abs(buy_price - from_coin_price) < 1e-15 or buy_price == 0.0
 
-        order_quantity = self.buy_quantity(origin_symbol, target_symbol, target_balance, from_coin_price)
+        order_quantity = self.buy_quantity(
+            origin_symbol, target_symbol, target_balance, from_coin_price
+        )
         target_quantity = order_quantity * from_coin_price
         self.balances[target_symbol] -= target_quantity
-        order_filled_quantity = order_quantity * (1 - self.get_fee(origin_coin, target_coin, False))
-        self.balances[origin_symbol] = self.balances.get(origin_symbol, 0) + order_filled_quantity
+        order_filled_quantity = order_quantity * (
+            1 - self.get_fee(origin_coin, target_coin, False)
+        )
+        self.balances[origin_symbol] = (
+            self.balances.get(origin_symbol, 0) + order_filled_quantity
+        )
         self.logger.info(
             f"Bought {origin_symbol}, balance now: {self.balances[origin_symbol]} - bridge: "
             f"{self.balances[target_symbol]}"
@@ -140,15 +161,22 @@ class MockBinanceManager(BinanceAPIManager):
         from_coin_price = self.get_ticker_price(origin_symbol + target_symbol)
         assert abs(sell_price - from_coin_price) < 1e-15
 
-        order_quantity = self.sell_quantity(origin_symbol, target_symbol, origin_balance)
+        order_quantity = self.sell_quantity(
+            origin_symbol, target_symbol, origin_balance
+        )
         target_quantity = order_quantity * from_coin_price
-        target_filled_quantity = target_quantity * (1 - self.get_fee(origin_coin, target_coin, True))
-        self.balances[target_symbol] = self.balances.get(target_symbol, 0) + target_filled_quantity
+        target_filled_quantity = target_quantity * (
+            1 - self.get_fee(origin_coin, target_coin, True)
+        )
+        self.balances[target_symbol] = (
+            self.balances.get(target_symbol, 0) + target_filled_quantity
+        )
         self.balances[origin_symbol] -= order_quantity
         self.logger.info(
             f"Sold {origin_symbol}, balance now: {self.balances[origin_symbol]} - bridge: "
             f"{self.balances[target_symbol]}"
         )
+        # self.metric.jump(origin_coin,target_coin,origin_balance,order_quantity,sell_price)
         return BinanceOrder(
             defaultdict(
                 lambda: None,
@@ -187,7 +215,13 @@ class MockDatabase(Database):
     def __init__(self, logger: Logger, config: Config):
         super().__init__(logger, config, "sqlite:///")
 
-    def log_scout(self, pair: Pair, target_ratio: float, current_coin_price: float, other_coin_price: float):
+    def log_scout(
+        self,
+        pair: Pair,
+        target_ratio: float,
+        current_coin_price: float,
+        other_coin_price: float,
+    ):
         pass
 
     def batch_log_scout(self, logs: List[ScoutHistory]):
@@ -216,8 +250,9 @@ def backtest(
     :return: The final coin balances
     """
     sqlite_cache = SQLiteCache("sqlite:///data/backtest_cache.db")
+    metric = Metric("sqlite:///data/metric.db")
     config = config or Config()
-    logger = Logger("backtesting", enable_notifications=False)
+    logger = Logger("backtesting", metric=metric, enable_notifications=False)
 
     end_date = end_date or datetime.today()
 
@@ -225,7 +260,11 @@ def backtest(
     db.create_database()
     db.set_coins(config.SUPPORTED_COIN_LIST)
     manager = MockBinanceManager(
-        Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET_KEY, tld=config.BINANCE_TLD),
+        Client(
+            config.BINANCE_API_KEY,
+            config.BINANCE_API_SECRET_KEY,
+            tld=config.BINANCE_TLD,
+        ),
         sqlite_cache,
         BinanceCache(),
         config,
@@ -250,6 +289,18 @@ def backtest(
     manager.set_reinit_trader_callback(trader.initialize)
     yield manager
 
+    run = logger.start_run_metric(
+        manager.config.BRIDGE.symbol,
+        starting_coin.symbol,
+        manager.config.SCOUT_MULTIPLIER,
+        manager.config.SCOUT_MARGIN,
+        True if manager.config.USE_MARGIN == "yes" else False,
+        start_date,
+        end_date,
+        datetime.now(),
+        None,
+        config.SUPPORTED_COIN_LIST
+    )
     n = 1
     try:
         while manager.datetime < end_date:
@@ -259,9 +310,11 @@ def backtest(
                 logger.warning(format_exc())
             manager.increment(interval)
             if n % yield_interval == 0:
+                logger.balance_metric(run, manager.balances, manager.datetime, manager.collate_coins("BTC"), manager.collate_coins(manager.config.BRIDGE.symbol))
                 yield manager
             n += 1
     except KeyboardInterrupt:
         pass
     sqlite_cache.close()
+    logger.end_run_metric(run)
     return manager

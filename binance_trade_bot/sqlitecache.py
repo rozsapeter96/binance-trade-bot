@@ -5,7 +5,7 @@ from sqlalchemy.sql.sqltypes import Date, Numeric, String
 from sqlalchemy import bindparam, create_engine, func, insert, select, update
 from sqlalchemy.orm import Session, scoped_session, sessionmaker
 from contextlib import contextmanager, nullcontext
-from .models.cache import Cache
+from .models.backtesting import Cache
 
 
 class SQLiteCache():
